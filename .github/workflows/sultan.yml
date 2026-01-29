@@ -58,21 +58,22 @@ jobs:
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
 
           echo "CONFIG set to: $CONFIG"
-
+          
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
           echo "Cloning AnyKernel3 and other dependencies..."
-
           ANYKERNEL_BRANCH="sultan-${{ inputs.codename }}"
-
+          
           # Debug print the branches
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
-
+          
           # Clone repositories using the branch names
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://github.com/TheWildJames/kernel_patches.git
-          #git clone https://github.com/kerneltoast/${{ inputs.repo }}
-          git clone https://github.com/kerneltoast/android_kernel_google_tensynos
+
+          # === ВОТ ТУТ ТВОЕ ИЗМЕНЕНИЕ ===
+          git clone https://github.com/MrCripe/android_kernel_google_tensynos -b 16.0.0-sultan
+
           if [ "${{ matrix.variant }}" != "WKSU" ]; then
             SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
             echo "Using branch for SUSFS: $SUSFS_BRANCH"
