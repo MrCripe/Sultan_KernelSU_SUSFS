@@ -72,7 +72,7 @@ jobs:
           git clone https://github.com/TheWildJames/kernel_patches.git
 
           # === ВОТ ТУТ ТВОЕ ИЗМЕНЕНИЕ ===
-          git clone https://github.com/MrCripe/android_kernel_google_tensynos -b 16.0.0-sultan
+          git clone https://github.com/kerneltoast/android_kernel_google_tensynos -b 16.0.0-sultan
 
           if [ "${{ matrix.variant }}" != "WKSU" ]; then
             SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
