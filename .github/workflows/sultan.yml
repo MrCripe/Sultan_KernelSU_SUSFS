@@ -72,7 +72,7 @@ jobs:
           git clone https://github.com/TheWildJames/kernel_patches.git
 
           # === ВОТ ТУТ ТВОЕ ИЗМЕНЕНИЕ ===
-          git clone https://github.com/kerneltoast/android_kernel_google_tensynos -b 16.0.0-sultan
+          git clone https://github.com/MrCripe/android_kernel_google_tensynos -b 16.0.0-sultan
 
           if [ "${{ matrix.variant }}" != "WKSU" ]; then
             SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
@@ -108,8 +108,8 @@ jobs:
           cp ../kernel_patches/sultan/sys.c_fix.patch ./
           patch -p1 < sys.c_fix.patch
 
-          cp ../kernel_patches/wild/susfs_fix_patches/v${SUSFS_VERSION}/a14-6.1/base.c.patch ./
-          patch -p1 < base.c.patch
+          #cp ../kernel_patches/wild/susfs_fix_patches/v${SUSFS_VERSION}/a14-6.1/base.c.patch ./
+          #patch -p1 < base.c.patch
 
       - name: Configure KernelSU
         run: |
@@ -209,7 +209,7 @@ jobs:
           echo "CONFIG_FW_LOADER=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_FW_LOADER_USER_HELPER=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_FW_LOADER_COMPRESS=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-      
+          echo "CONFIG_MQ_IOSCHED_KYBER=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
       - name: Run sed and perl Commands
         run: |
           echo "Changing to configuration directory: $CONFIG..."
