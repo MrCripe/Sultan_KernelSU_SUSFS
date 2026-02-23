@@ -238,45 +238,6 @@ jobs:
           echo "Running sed commands..."
           sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild"/' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           
-      - name: Integrate LRNG (Performance Optimization)
-        run: |
-          cd "$CONFIG"
-          echo "1. Cloning LRNG repository..."
-          git clone https://github.com/smuellerDD/lrng.git ../lrng_repo
-          
-          echo "2. Copying LRNG source code into kernel tree..."
-          mkdir -p drivers/char/lrng
-          cp ../lrng_repo/*.[ch] drivers/char/lrng/
-          cp ../lrng_repo/Makefile drivers/char/lrng/
-          cp ../lrng_repo/Kconfig drivers/char/lrng/
-          
-          echo "3. Hooking LRNG into the kernel..."
-          # Вырезаем старый генератор (random.o) из сборки и добавляем новый (lrng)
-          sed -i 's/random.o//g' drivers/char/Makefile
-          echo "obj-\$(CONFIG_LRNG) += lrng/" >> drivers/char/Makefile
-          
-          # Подключаем меню настроек LRNG
-          echo 'source "drivers/char/lrng/Kconfig"' >> drivers/char/Kconfig
-          
-          echo "4. Applying backport patches for 6.1.x..."
-          cd ../lrng_repo/backports/v60-6.1.159/
-          
-          # Команда "|| true" не дает скрипту упасть, если патч уже был применен или не нужен
-          patch -d ../../../$CONFIG -p1 < v60-000001-backport-scheduler-add.patch || true
-          patch -d ../../../$CONFIG -p1 < v60-01-config_base_small.patch || true
-          patch -d ../../../$CONFIG -p1 < v60-02-sysctl-unconstify.patch || true
-          patch -d ../../../$CONFIG -p1 < v60-03-undo-backport-scheduler-add.patch || true
-          patch -d ../../../$CONFIG -p1 < v60-04-revert_chacha20_api_update.patch || true
-          patch -d ../../../$CONFIG -p1 < v60-05-revert_vdso_api_update.patch || true
-          patch -d ../../../$CONFIG -p1 < v60-06-revert_sysctl_api_update.patch || true
-          
-          cd ../../../$CONFIG
-          
-          echo "5. Activating LRNG in kernel config..."
-          echo "# LRNG Optimization" >> arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_LRNG=y" >> arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_LRNG_DRNG_CHACHA20=y" >> arch/arm64/configs/${{ inputs.codename }}_defconfig
-
       - name: Build the Kernel
         run: |
           echo "Changing to configuration directory: $CONFIG..."
