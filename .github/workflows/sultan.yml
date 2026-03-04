@@ -188,6 +188,8 @@ jobs:
             echo "Patching task_mmu.c to fix 16K build error..."
             sed -i '/BUILD_BUG_ON(CONFIG_ARM64_VA_BITS > 40)/d' fs/proc/task_mmu.c
             # ------------------------------------------
+            echo "CONFIG_MODULE_SIG=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig  
+            echo "CONFIG_MODULE_SIG_ALL=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
             
             echo "16KB Page Size enabled."
           else
