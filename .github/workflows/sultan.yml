@@ -1,4 +1,5 @@
 name: Sultan
+
 permissions:
   contents: write # Allow writing to repository contents (for pushing tags)
   actions: write # Allows triggering actions
@@ -27,20 +28,8 @@ jobs:
       matrix:
         variant: ["WKSU-SUSFS"]
         page_size: ["4K", "16K"]
-    steps:
-      #- name: Maximize Build Space
-      #  uses: AdityaGarg8/remove-unwanted-software@v5
-      #  with:
-      #    remove-dotnet: 'true'          # Frees ~2 GB
-      #    remove-android: 'true'         # Frees ~9 GB
-      #    remove-haskell: 'true'         # Frees ~5.2 GB
-      #    remove-codeql: 'true'          # Frees ~5.4 GB
-      #    remove-docker-images: 'true'   # Frees ~3.2 GB
-      #    remove-large-packages: 'true'  # Frees ~3.1 GB
-      #    remove-swapfile: 'true'        # Frees ~4 GB
-      #    remove-cached-tools: 'false'   # Avoid unless confirmed safe
-      #    verbose: 'true'                # Enable detailed logging
 
+    steps:
       - name: Download and extract GCC 14.2.0 toolchain
         run: |
           echo "Downloading GCC 14.2.0 cross-compiler toolchain..."
@@ -54,26 +43,21 @@ jobs:
       - name: Set CONFIG Environment Variable
         run: |
           CONFIG="android_kernel_google_tensynos"
-
           # Set CONFIG as an environment variable for future steps
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
-
           echo "CONFIG set to: $CONFIG"
 
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
           echo "Cloning AnyKernel3 and other dependencies..."
-
           ANYKERNEL_BRANCH="sultan-${{ inputs.codename }}"
-
           # Debug print the branches
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
-
           # Clone repositories using the branch names
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://github.com/TheWildJames/kernel_patches.git
-          #git clone https://github.com/kerneltoast/${{ inputs.repo }}
           git clone https://github.com/kerneltoast/android_kernel_google_tensynos
+          
           if [ "${{ matrix.variant }}" != "WKSU" ]; then
             SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
             echo "Using branch for SUSFS: $SUSFS_BRANCH"
@@ -84,7 +68,6 @@ jobs:
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-
           echo "Adding KernelSU..."
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/stable/kernel/setup.sh" | bash -s canary
 
@@ -93,16 +76,12 @@ jobs:
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-
           SUSFS_VERSION="2.0.0"
-
           echo "Applying SUSFS patches..."
-
           # Copy SUSFS patches
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
           cp ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
-
           # Change to common directory and apply SUSFS patch
           patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
           cp ../kernel_patches/sultan/sys.c_fix.patch ./
@@ -172,7 +151,7 @@ jobs:
           echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_IP_SET_LIST_SET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-      
+
       - name: Configure Page Size
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -201,10 +180,9 @@ jobs:
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-
           echo "Running sed commands..."
           sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild"/' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          
+
       - name: Enable Kyber I/O Scheduler
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -217,7 +195,7 @@ jobs:
           # 2. Добавляем свою строчку для включения
           echo "CONFIG_MQ_IOSCHED_KYBER=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
 
-      - name: Build the Kernel and Install Modules
+      - name: Build the Kernel and Modules
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
@@ -226,54 +204,58 @@ jobs:
           CC_PATH="$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc"
           CROSS_PATH="$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-"
           
-          # 1. Генерируем .config
+          echo "Building config..."
           make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all) ${{ inputs.codename }}_defconfig
           
-          # 2. Собираем ядро (Image.lz4, dtb) и модули (.ko)
+          echo "Building kernel and modules..."
           make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all)
           
-          # 3. Создаем временную папку для модулей
-          mkdir -p ../modules_tmp
-          
-          # 4. ВАЖНО: Устанавливаем все собранные модули в эту временную папку
-          make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH INSTALL_MOD_PATH=../modules_tmp INSTALL_MOD_STRIP=1 modules_install
+          echo "Installing modules to temporary directory..."
+          # Это самая важная команда! Она собирает все .ko файлы и срезает с них лишний вес (INSTALL_MOD_STRIP)
+          make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH INSTALL_MOD_PATH=../modules_tmp INSTALL_MOD_STRIP=1 modules_install || true
 
-      - name: Pack AnyKernel3 (Image, DTB and Modules)
+      - name: Copy Images and Modules
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           
-          # 1. Копируем ядро (Image.lz4)
           echo "Copying Image.lz4..."
-          cp arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4 || cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4 || cp arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
           
-          # 2. Собираем и копируем DTB
           echo "Copying DTB files..."
           if [ "${{ inputs.codename }}" == "gs201" ]; then
-            cat google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb || cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
+            cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb || cat google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
           elif [ "${{ inputs.codename }}" == "zuma" ]; then
-            cat google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb || cat ./out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
+            cat ./out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb || cat google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
           elif [ "${{ inputs.codename }}" == "zumapro" ]; then
-            cat google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb || cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
+            cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb || cat google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
           fi
 
-          # 3. Переносим установленные модули в AnyKernel3
-          echo "Copying Kernel Modules..."
+          echo "Copying Kernel Modules (.ko)..."
           mkdir -p ../AnyKernel3/modules/vendor_dlkm/lib/modules
+          mkdir -p ../AnyKernel3/modules/system_dlkm/lib/modules
           
-          # Копируем все .ko файлы из временной папки в структуру AK3
-          find ../modules_tmp -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
+          # Копируем аккуратно собранные модули из временной папки в AnyKernel3
+          if [ -d "../modules_tmp" ]; then
+            find ../modules_tmp -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
+          else
+            # Резервный вариант, если modules_install не сработал
+            find . -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
+            $GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-strip --strip-debug ../AnyKernel3/modules/vendor_dlkm/lib/modules/*.ko || true
+          fi
           
-          echo "Packing complete! Checking modules folder:"
-          ls -l ../AnyKernel3/modules/vendor_dlkm/lib/modules/ | wc -l
+          echo "=== MODULES CHECK ==="
+          echo "Скопировано драйверов (.ko):"
+          ls -1 ../AnyKernel3/modules/vendor_dlkm/lib/modules/ | wc -l
 
       - name: Create ZIP Files for Different Formats
         run: |
           echo "Navigating to AnyKernel3 directory..."
           cd ./AnyKernel3
-
-          # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="${{ matrix.variant }}-${{ inputs.codename }}-A16-Sultan.zip"
+          
+          # Добавили ${{ matrix.page_size }} в название, чтобы 4K и 16K не перезаписывали друг друга!
+          ZIP_NAME="${{ matrix.variant }}-${{ inputs.codename }}-A16-Sultan-${{ matrix.page_size }}.zip"
+          
           echo "Creating zip file $ZIP_NAME..."
           zip -r "../$ZIP_NAME" ./*
 
@@ -283,34 +265,29 @@ jobs:
           name: kernel-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
           path: |
             *.zip
-            
+
       - name: Collect .rej files
         if: ${{ always() }}
         id: collect_rej
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$GITHUB_WORKSPACE"
           rm -rf rej
           mkdir -p rej
-
           found="false"
           while IFS= read -r -d '' rej_file; do
             found="true"
             original_file="${rej_file%.rej}"
             rej_rel="${rej_file#./}"
             original_rel="${original_file#./}"
-
             mkdir -p "rej/$(dirname "$rej_rel")"
             cp -f "$rej_file" "rej/$rej_rel"
-
             if [[ -f "$original_file" ]]; then
               mkdir -p "rej/$(dirname "$original_rel")"
               cp -f "$original_file" "rej/$original_rel"
             fi
           done < <(find . -type f -name '*.rej' -print0)
-
           echo "found=$found" >> "$GITHUB_OUTPUT"
 
       - name: Zip collected .rej bundle
