@@ -225,13 +225,13 @@ jobs:
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all) ${{ inputs.codename }}_defconfig
           make CROSS_COMPILE=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux- CC=$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc -j$(nproc --all)
 
-      - name: Copy Images
+      - name: Copy Images and Modules
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-
           echo "Copying Image.lz4 and concatenating DTB files..."
           cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          
           if [ "${{ inputs.codename }}" == "gs201" ]; then
             cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
             #cp ./out/google-devices/gs201/dts/dtbo.img ../AnyKernel3/dtbo.img
@@ -240,6 +240,17 @@ jobs:
           elif [ "${{ inputs.codename }}" == "zumapro" ]; then
             cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
           fi
+
+          echo "Copying Kernel Modules (.ko)..."
+          # Создаем папки для модулей внутри структуры AnyKernel3
+          mkdir -p ../AnyKernel3/modules/vendor_dlkm/lib/modules
+          mkdir -p ../AnyKernel3/modules/system_dlkm/lib/modules
+          
+          # Ищем все скомпилированные модули и копируем их
+          find ./out/ -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
+          
+          # Убираем отладочную информацию (debug symbols) из модулей, чтобы они не весили сотни мегабайт
+          $GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-strip --strip-debug ../AnyKernel3/modules/vendor_dlkm/lib/modules/*.ko || true
 
       - name: Create ZIP Files for Different Formats
         run: |
