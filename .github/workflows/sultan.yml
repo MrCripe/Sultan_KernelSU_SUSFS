@@ -175,6 +175,7 @@ jobs:
       
       - name: Configure Page Size
         run: |
+          echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           if [ "${{ matrix.page_size }}" == "16K" ]; then
             echo "# 16KB Page Size Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
@@ -182,6 +183,12 @@ jobs:
             sed -i 's/CONFIG_ARM64_4K_PAGES=y/# CONFIG_ARM64_4K_PAGES is not set/g' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
             # Включаем 16KB страницы
             echo "CONFIG_ARM64_16K_PAGES=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+            
+            # --- НОВЫЙ КОД (ФИКС ОШИБКИ КОМПИЛЯЦИИ) ---
+            echo "Patching task_mmu.c to fix 16K build error..."
+            sed -i '/BUILD_BUG_ON(CONFIG_ARM64_VA_BITS > 40)/d' fs/proc/task_mmu.c
+            # ------------------------------------------
+            
             echo "16KB Page Size enabled."
           else
             echo "Keeping default 4KB Page Size."
