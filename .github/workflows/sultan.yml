@@ -26,6 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         variant: ["WKSU-SUSFS"]
+        page_size: ["4K", "16K"]
     steps:
       #- name: Maximize Build Space
       #  uses: AdityaGarg8/remove-unwanted-software@v5
@@ -171,6 +172,20 @@ jobs:
           echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
           echo "CONFIG_IP_SET_LIST_SET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+      
+      - name: Configure Page Size
+        run: |
+          cd "$CONFIG"
+          if [ "${{ matrix.page_size }}" == "16K" ]; then
+            echo "# 16KB Page Size Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+            # Отключаем 4KB страницы
+            sed -i 's/CONFIG_ARM64_4K_PAGES=y/# CONFIG_ARM64_4K_PAGES is not set/g' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+            # Включаем 16KB страницы
+            echo "CONFIG_ARM64_16K_PAGES=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+            echo "16KB Page Size enabled."
+          else
+            echo "Keeping default 4KB Page Size."
+          fi
 
       - name: Run sed and perl Commands
         run: |
@@ -179,6 +194,18 @@ jobs:
 
           echo "Running sed commands..."
           sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild"/' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          
+      - name: Enable Kyber I/O Scheduler
+        run: |
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+          echo "Enabling Kyber..."
+          
+          # 1. Удаляем строчку Sultan'а, которая блокирует Kyber
+          sed -i 's/# CONFIG_MQ_IOSCHED_KYBER is not set//g' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+          
+          # 2. Добавляем свою строчку для включения
+          echo "CONFIG_MQ_IOSCHED_KYBER=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
 
       - name: Build the Kernel
         run: |
@@ -217,10 +244,10 @@ jobs:
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ inputs.codename }}-${{ matrix.variant }}
+          name: kernel-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
           path: |
             *.zip
-
+            
       - name: Collect .rej files
         if: ${{ always() }}
         id: collect_rej
@@ -256,12 +283,12 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          zip -r "rej-${{ inputs.codename }}-${{ matrix.variant }}.zip" rej
+          zip -r "rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}.zip" rej
 
       - name: Upload .rej bundle
         if: ${{ always() && steps.collect_rej.outputs.found == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: rej-${{ inputs.codename }}-${{ matrix.variant }}
+          name: rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
           path: |
-            rej-${{ inputs.codename }}-${{ matrix.variant }}.zip
+            rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}.zip
