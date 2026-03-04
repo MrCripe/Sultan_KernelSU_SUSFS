@@ -1,11 +1,11 @@
 name: Sultan
 
 permissions:
-  contents: write # Allow writing to repository contents (for pushing tags)
-  actions: write # Allows triggering actions
+  contents: write
+  actions: write
 
 on:
-  workflow_call: # This allows this workflow to be called from another workflow
+  workflow_call:
     inputs:
       codename:
         required: true
@@ -34,237 +34,162 @@ jobs:
         run: |
           echo "Downloading GCC 14.2.0 cross-compiler toolchain..."
           wget https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
-          echo "Extracting .gz file..."
           gunzip x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
-          echo "Extracting .tar file..."
           tar -xf x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar
-          echo "GCC 14.2.0 toolchain extracted successfully"
 
       - name: Set CONFIG Environment Variable
         run: |
           CONFIG="android_kernel_google_tensynos"
-          # Set CONFIG as an environment variable for future steps
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
-          echo "CONFIG set to: $CONFIG"
 
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
-          echo "Cloning AnyKernel3 and other dependencies..."
           ANYKERNEL_BRANCH="sultan-${{ inputs.codename }}"
-          # Debug print the branches
-          echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
-          # Clone repositories using the branch names
           git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://github.com/TheWildJames/kernel_patches.git
           git clone https://github.com/kerneltoast/android_kernel_google_tensynos
           
           if [ "${{ matrix.variant }}" != "WKSU" ]; then
             SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
-            echo "Using branch for SUSFS: $SUSFS_BRANCH"
             git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
           fi
 
       - name: Add KernelSU
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-          echo "Adding KernelSU..."
           curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/stable/kernel/setup.sh" | bash -s canary
 
       - name: Apply SUSFS Patches
         if: ${{ matrix.variant != 'WKSU' }}
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-          SUSFS_VERSION="2.0.0"
-          echo "Applying SUSFS patches..."
-          # Copy SUSFS patches
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
           cp ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
-          # Change to common directory and apply SUSFS patch
           patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
           cp ../kernel_patches/sultan/sys.c_fix.patch ./
           patch -p1 < sys.c_fix.patch
 
-      - name: Configure KernelSU
+      - name: Configure Kernel Settings (KSU, Mountify, Net, BBR, IPSet, Kyber)
         run: |
           cd "$CONFIG"
-          # KernelSU Configuration
-          echo "# KernelSU Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          if [ "${{ matrix.variant }}" != "WKSU" ]; then
-            echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          else
-            echo "CONFIG_KSU_SUSFS=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          fi
+          CONF="./arch/arm64/configs/${{ inputs.codename }}_defconfig"
+          
+          echo "CONFIG_KSU=y" >> $CONF
+          if [ "${{ matrix.variant }}" != "WKSU" ]; then echo "CONFIG_KSU_SUSFS=y" >> $CONF; else echo "CONFIG_KSU_SUSFS=n" >> $CONF; fi
+          
+          echo "CONFIG_TMPFS_XATTR=y" >> $CONF
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> $CONF
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> $CONF
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> $CONF
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> $CONF
+          
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> $CONF
+          echo "CONFIG_TCP_CONG_BBR=y" >> $CONF
+          echo "CONFIG_NET_SCH_FQ=y" >> $CONF
+          echo "CONFIG_TCP_CONG_BIC=n" >> $CONF
+          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> $CONF
+          echo "CONFIG_TCP_CONG_HTCP=n" >> $CONF
+          
+          echo "CONFIG_IP_SET=y" >> $CONF
+          echo "CONFIG_IP_SET_MAX=65534" >> $CONF
+          echo "CONFIG_IP_SET_BITMAP_IP=y" >> $CONF
+          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> $CONF
+          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_IP=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_IPMARK=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_IPMAC=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_MAC=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_NET=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_NETNET=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> $CONF
+          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> $CONF
+          echo "CONFIG_IP_SET_LIST_SET=y" >> $CONF
+          
+          sed -i 's/# CONFIG_MQ_IOSCHED_KYBER is not set//g' $CONF
+          echo "CONFIG_MQ_IOSCHED_KYBER=y" >> $CONF
+          
+          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild"/' $CONF
 
-      - name: Configure Mountify Support
+      - name: Configure Page Size (4K / 16K)
         run: |
           cd "$CONFIG"
-          # Mountify Support
-          echo "# Mountify Support" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TMPFS_XATTR=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
-      - name: Configure Networking
-        run: |
-          cd "$CONFIG"
-          # Networking Configuration
-          echo "# Networking Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_NF_TARGET_TTL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP6_NF_TARGET_HL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP6_NF_MATCH_HL=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
-      - name: Configure TCP Congestion Control
-        run: |
-          cd "$CONFIG"
-          # BBR TCP Congestion Control
-          echo "# BBR TCP Congestion Control" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TCP_CONG_BBR=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_NET_SCH_FQ=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TCP_CONG_BIC=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_TCP_CONG_HTCP=n" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
-      - name: Configure IPSet Support
-        run: |
-          cd "$CONFIG"
-          # IPSet support
-          echo "# IPSet Support" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_MAX=65534" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_BITMAP_IP=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_BITMAP_IPMAC=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_BITMAP_PORT=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_IP=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_IPMARK=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORT=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORTIP=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_IPPORTNET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_IPMAC=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_MAC=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_NETPORTNET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_NET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_NETNET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_NETPORT=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          echo "CONFIG_IP_SET_LIST_SET=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
-      - name: Configure Page Size
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
+          CONF="./arch/arm64/configs/${{ inputs.codename }}_defconfig"
+          
           if [ "${{ matrix.page_size }}" == "16K" ]; then
-            echo "# 16KB Page Size Configuration" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+            sed -i 's/CONFIG_ARM64_4K_PAGES=y/# CONFIG_ARM64_4K_PAGES is not set/g' $CONF
+            sed -i 's/CONFIG_ARM64_VA_BITS_39=y/# CONFIG_ARM64_VA_BITS_39 is not set/g' $CONF
             
-            # Отключаем 4KB и 39-битную адресацию
-            sed -i 's/CONFIG_ARM64_4K_PAGES=y/# CONFIG_ARM64_4K_PAGES is not set/g' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-            sed -i 's/CONFIG_ARM64_VA_BITS_39=y/# CONFIG_ARM64_VA_BITS_39 is not set/g' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
+            echo "CONFIG_ARM64_16K_PAGES=y" >> $CONF
+            echo "CONFIG_ARM64_VA_BITS_47=y" >> $CONF
+            echo "CONFIG_ARM64_VA_BITS=47" >> $CONF
             
-            # Включаем 16KB и 47-битную адресацию
-            echo "CONFIG_ARM64_16K_PAGES=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-            echo "CONFIG_ARM64_VA_BITS_47=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-            echo "CONFIG_ARM64_VA_BITS=47" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-            
-            # Фикс защиты Google
             sed -i '/BUILD_BUG_ON(CONFIG_ARM64_VA_BITS > 40)/d' fs/proc/task_mmu.c
-            
             echo "16KB Page Size enabled."
           else
             echo "Keeping default 4KB Page Size."
           fi
 
-      - name: Run sed and perl Commands
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-          echo "Running sed commands..."
-          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Wild"/' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
-      - name: Enable Kyber I/O Scheduler
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-          echo "Enabling Kyber..."
-          
-          # 1. Удаляем строчку Sultan'а, которая блокирует Kyber
-          sed -i 's/# CONFIG_MQ_IOSCHED_KYBER is not set//g' ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-          
-          # 2. Добавляем свою строчку для включения
-          echo "CONFIG_MQ_IOSCHED_KYBER=y" >> ./arch/arm64/configs/${{ inputs.codename }}_defconfig
-
       - name: Build the Kernel and Modules
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-          
-          # Задаем пути к компилятору
           CC_PATH="$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc"
           CROSS_PATH="$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-"
           
-          echo "Building config..."
-          make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all) ${{ inputs.codename }}_defconfig
+          # Жестко заставляем ядро собираться в папку out, чтобы ничего не потерялось
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all) ${{ inputs.codename }}_defconfig
           
-          echo "Building kernel and modules..."
-          make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all)
+          # Собираем ядро и ПРИНУДИТЕЛЬНО модули
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all) all modules
           
-          echo "Installing modules to temporary directory..."
-          # Это самая важная команда! Она собирает все .ko файлы и срезает с них лишний вес (INSTALL_MOD_STRIP)
-          make CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH INSTALL_MOD_PATH=../modules_tmp INSTALL_MOD_STRIP=1 modules_install || true
+          # Устанавливаем и обрезаем модули в подготовленную папку
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH INSTALL_MOD_PATH=../modules_tmp INSTALL_MOD_STRIP=1 modules_install || true
 
-      - name: Copy Images and Modules
+      - name: Pack AnyKernel3
         run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
+          # 1. Принудительно заставляем AnyKernel3 прошивать модули в телефон!
+          cd AnyKernel3
+          sed -i 's/do.modules=0/do.modules=1/g' anykernel.sh || true
+          sed -i 's/do.vendor_dlkm=0/do.vendor_dlkm=1/g' anykernel.sh || true
+          cd ..
           
-          echo "Copying Image.lz4..."
-          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4 || cp arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          cd "$CONFIG"
+          echo "Copying Image..."
+          cp out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4 || true
           
           echo "Copying DTB files..."
           if [ "${{ inputs.codename }}" == "gs201" ]; then
-            cat ./out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb || cat google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb
+            cat out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb || true
           elif [ "${{ inputs.codename }}" == "zuma" ]; then
-            cat ./out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb || cat google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
+            cat out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb || true
           elif [ "${{ inputs.codename }}" == "zumapro" ]; then
-            cat ./out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb || cat google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb
+            cat out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb || true
           fi
 
-          echo "Copying Kernel Modules (.ko)..."
+          echo "Copying Kernel Modules..."
           mkdir -p ../AnyKernel3/modules/vendor_dlkm/lib/modules
-          mkdir -p ../AnyKernel3/modules/system_dlkm/lib/modules
           
-          # Копируем аккуратно собранные модули из временной папки в AnyKernel3
-          if [ -d "../modules_tmp" ]; then
-            find ../modules_tmp -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
-          else
-            # Резервный вариант, если modules_install не сработал
-            find . -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
-            $GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-strip --strip-debug ../AnyKernel3/modules/vendor_dlkm/lib/modules/*.ko || true
-          fi
+          # Ищем драйверы во временной папке и переносим их в AnyKernel3
+          find ../modules_tmp -type f -name "*.ko" -exec cp {} ../AnyKernel3/modules/vendor_dlkm/lib/modules/ \;
           
           echo "=== MODULES CHECK ==="
-          echo "Скопировано драйверов (.ko):"
           ls -1 ../AnyKernel3/modules/vendor_dlkm/lib/modules/ | wc -l
 
-      - name: Create ZIP Files for Different Formats
+      - name: Create ZIP Files
         run: |
-          echo "Navigating to AnyKernel3 directory..."
           cd ./AnyKernel3
-          
-          # Добавили ${{ matrix.page_size }} в название, чтобы 4K и 16K не перезаписывали друг друга!
           ZIP_NAME="${{ matrix.variant }}-${{ inputs.codename }}-A16-Sultan-${{ matrix.page_size }}.zip"
-          
-          echo "Creating zip file $ZIP_NAME..."
-          zip -r "../$ZIP_NAME" ./*
+          zip -r9 "../$ZIP_NAME" * -x .git README.md *placeholder
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
-          path: |
-            *.zip
+          path: *.zip
 
       - name: Collect .rej files
         if: ${{ always() }}
@@ -303,5 +228,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
-          path: |
-            rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}.zip
+          path: rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}.zip
