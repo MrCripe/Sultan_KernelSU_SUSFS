@@ -1,78 +1,93 @@
-name: Sultan
+name: Sultan Ultimate (Zuma Only)
 
 permissions:
   contents: write
   actions: write
 
 on:
-  workflow_call:
-    inputs:
-      codename:
-        required: true
-        type: string
-      repo:
-        required: true
-        type: string
-      android_version:
-        required: true
-        type: string
-      kernel_version:
-        required: true
-        type: string
+  workflow_dispatch: # Позволяет запускать сборку кнопкой "Run workflow" из интерфейса GitHub
+  push:
+    branches:
+      - main
+      - master
+
+env:
+  CODENAME: "zuma"
+  ANDROID_VER: "android14"
+  KERNEL_VER: "6.1"
+  CONFIG: "android_kernel_google_tensynos"
 
 jobs:
-  build-kernel-sultan-clean:
+  build-kernel-zuma-ultimate:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: ["Clean"]
-        page_size: ["4K", "16K"]
-
     steps:
       - name: Download and extract GCC 14.2.0 toolchain
         run: |
           echo "Downloading GCC 14.2.0 cross-compiler toolchain..."
-          wget https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
+          wget -q https://www.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
           gunzip x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz
           tar -xf x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar
 
-      - name: Set CONFIG Environment Variable
+      - name: Clone AnyKernel3 and Kernel Repositories
         run: |
-          CONFIG="android_kernel_google_tensynos"
-          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
-
-      - name: Clone AnyKernel3 and Kernel
-        run: |
-          ANYKERNEL_BRANCH="sultan-${{ inputs.codename }}"
-          git clone https://github.com/TheWildJames/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
+          # Клонируем AnyKernel3 специально для Zuma
+          git clone https://github.com/TheWildJames/AnyKernel3.git -b "sultan-$CODENAME"
+          
+          # Клонируем исходники ядра Sultan и патчи
           git clone https://github.com/TheWildJames/kernel_patches.git
           git clone https://github.com/kerneltoast/android_kernel_google_tensynos
-
-      - name: Apply Basic Fixes
-        run: |
-          cd "$CONFIG"
-          cp ../kernel_patches/sultan/sys.c_fix.patch ./
-          patch -p1 < sys.c_fix.patch || true
-
-      - name: Configure Kernel Settings (Net, BBR, IPSet, Kyber)
-        run: |
-          cd "$CONFIG"
-          CONF="./arch/arm64/configs/${{ inputs.codename }}_defconfig"
           
+          # Клонируем SUSFS
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "gki-$ANDROID_VER-$KERNEL_VER"
+
+      - name: Add Wild KernelSU
+        run: |
+          cd "$CONFIG"
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/stable/kernel/setup.sh" | bash -s canary
+
+      - name: Apply SUSFS Patches & Fixes
+        run: |
+          cd "$CONFIG"
+          # Применяем патчи скрытности SUSFS
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-$ANDROID_VER-$KERNEL_VER.patch ./
+          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          patch -p1 < 50_add_susfs_in_gki-$ANDROID_VER-$KERNEL_VER.patch || true
+          
+          # Фикс компиляции SUSFS конкретно для базы Sultan
+          cp ../kernel_patches/sultan/sys.c_fix.patch ./
+          patch -p1 < sys.c_fix.patch
+
+      - name: Configure Ultimate Settings (4K, KSU, Net, Battery, I/O)
+        run: |
+          cd "$CONFIG"
+          CONF="./arch/arm64/configs/${CODENAME}_defconfig"
+          
+          # 1. Принудительно ставим 4К страницы (Стабильность и совместимость)
+          sed -i 's/CONFIG_ARM64_16K_PAGES=y/# CONFIG_ARM64_16K_PAGES is not set/g' $CONF
+          echo "CONFIG_ARM64_4K_PAGES=y" >> $CONF
+          
+          # 2. Wild KSU + SUSFS + Mountify
+          echo "CONFIG_KSU=y" >> $CONF
+          echo "CONFIG_KSU_SUSFS=y" >> $CONF
           echo "CONFIG_TMPFS_XATTR=y" >> $CONF
           echo "CONFIG_TMPFS_POSIX_ACL=y" >> $CONF
+          
+          # 3. Анти-DPI (Раздача интернета)
           echo "CONFIG_IP_NF_TARGET_TTL=y" >> $CONF
           echo "CONFIG_IP6_NF_TARGET_HL=y" >> $CONF
           echo "CONFIG_IP6_NF_MATCH_HL=y" >> $CONF
           
+          # 4. Сетевые оптимизации (BBR + CAKE) для низкого пинга
           echo "CONFIG_TCP_CONG_ADVANCED=y" >> $CONF
           echo "CONFIG_TCP_CONG_BBR=y" >> $CONF
+          echo "CONFIG_NET_SCH_CAKE=y" >> $CONF
           echo "CONFIG_NET_SCH_FQ=y" >> $CONF
           echo "CONFIG_TCP_CONG_BIC=n" >> $CONF
           echo "CONFIG_TCP_CONG_WESTWOOD=n" >> $CONF
           echo "CONFIG_TCP_CONG_HTCP=n" >> $CONF
           
+          # 5. IPSet (VPN и фаерволы)
           echo "CONFIG_IP_SET=y" >> $CONF
           echo "CONFIG_IP_SET_MAX=65534" >> $CONF
           echo "CONFIG_IP_SET_BITMAP_IP=y" >> $CONF
@@ -92,29 +107,17 @@ jobs:
           echo "CONFIG_IP_SET_HASH_NETIFACE=y" >> $CONF
           echo "CONFIG_IP_SET_LIST_SET=y" >> $CONF
           
+          # 6. Kyber I/O Scheduler (Плавность памяти)
           sed -i 's/# CONFIG_MQ_IOSCHED_KYBER is not set//g' $CONF
           echo "CONFIG_MQ_IOSCHED_KYBER=y" >> $CONF
           
-          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Clean"/' $CONF
-
-      - name: Configure Page Size (4K / 16K)
-        run: |
-          cd "$CONFIG"
-          CONF="./arch/arm64/configs/${{ inputs.codename }}_defconfig"
+          # 7. Оптимизация батареи и процессора (Снижение Overhead'а)
+          echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y" >> $CONF
+          echo "CONFIG_SCHED_DEBUG=n" >> $CONF
+          echo "CONFIG_SLUB_DEBUG=n" >> $CONF
           
-          if [ "${{ matrix.page_size }}" == "16K" ]; then
-            sed -i 's/CONFIG_ARM64_4K_PAGES=y/# CONFIG_ARM64_4K_PAGES is not set/g' $CONF
-            sed -i 's/CONFIG_ARM64_VA_BITS_39=y/# CONFIG_ARM64_VA_BITS_39 is not set/g' $CONF
-            
-            echo "CONFIG_ARM64_16K_PAGES=y" >> $CONF
-            echo "CONFIG_ARM64_VA_BITS_47=y" >> $CONF
-            echo "CONFIG_ARM64_VA_BITS=47" >> $CONF
-            
-            sed -i '/BUILD_BUG_ON(CONFIG_ARM64_VA_BITS > 40)/d' fs/proc/task_mmu.c
-            echo "16KB Page Size enabled."
-          else
-            echo "Keeping default 4KB Page Size."
-          fi
+          # 8. Фирменное имя
+          sed -i 's/CONFIG_LOCALVERSION="-Sultan"/CONFIG_LOCALVERSION="-Sultan-Zuma-Ultimate"/' $CONF
 
       - name: Build the Kernel
         run: |
@@ -122,72 +125,28 @@ jobs:
           CC_PATH="$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-gcc"
           CROSS_PATH="$GITHUB_WORKSPACE/gcc-14.2.0-nolibc/aarch64-linux/bin/aarch64-linux-"
           
-          # Собираем чистое ядро в папку out
-          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all) ${{ inputs.codename }}_defconfig
+          # Сборка только ядра (модули встроены у Султана)
+          make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all) ${CODENAME}_defconfig
           make O=out ARCH=arm64 CROSS_COMPILE=$CROSS_PATH CC=$CC_PATH -j$(nproc --all)
 
       - name: Pack AnyKernel3
         run: |
           cd "$CONFIG"
-          echo "Copying Image..."
-          cp out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4 || true
           
-          echo "Copying DTB files..."
-          if [ "${{ inputs.codename }}" == "gs201" ]; then
-            cat out/google-devices/gs201/dts/*.dtb > ../AnyKernel3/dtb || true
-          elif [ "${{ inputs.codename }}" == "zuma" ]; then
-            cat out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb || true
-          elif [ "${{ inputs.codename }}" == "zumapro" ]; then
-            cat out/google-devices/zumapro/dts/*.dtb > ../AnyKernel3/dtb || true
-          fi
+          echo "Copying Image..."
+          cp out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          
+          echo "Copying DTB files for Zuma..."
+          cat out/google-devices/zuma/dts/*.dtb > ../AnyKernel3/dtb
 
-      - name: Create ZIP Files
+      - name: Create ZIP File
         run: |
           cd ./AnyKernel3
-          ZIP_NAME="${{ matrix.variant }}-${{ inputs.codename }}-A16-Sultan-${{ matrix.page_size }}.zip"
+          ZIP_NAME="WKSU-SUSFS-Sultan-Zuma-Ultimate.zip"
           zip -r9 "../$ZIP_NAME" * -x .git README.md *placeholder
 
-      - name: Upload Build Artifacts
+      - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
+          name: kernel-sultan-zuma-ultimate
           path: "*.zip"
-
-      - name: Collect .rej files
-        if: ${{ always() }}
-        id: collect_rej
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          rm -rf rej
-          mkdir -p rej
-          found="false"
-          while IFS= read -r -d '' rej_file; do
-            found="true"
-            original_file="${rej_file%.rej}"
-            rej_rel="${rej_file#./}"
-            original_rel="${original_file#./}"
-            mkdir -p "rej/$(dirname "$rej_rel")"
-            cp -f "$rej_file" "rej/$rej_rel"
-            if [[ -f "$original_file" ]]; then
-              mkdir -p "rej/$(dirname "$original_rel")"
-              cp -f "$original_file" "rej/$original_rel"
-            fi
-          done < <(find . -type f -name '*.rej' -print0)
-          echo "found=$found" >> "$GITHUB_OUTPUT"
-
-      - name: Zip collected .rej bundle
-        if: ${{ always() && steps.collect_rej.outputs.found == 'true' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          zip -r "rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}.zip" rej
-
-      - name: Upload .rej bundle
-        if: ${{ always() && steps.collect_rej.outputs.found == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}
-          path: "rej-${{ inputs.codename }}-${{ matrix.variant }}-${{ matrix.page_size }}.zip"
